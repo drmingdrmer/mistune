@@ -1,4 +1,8 @@
 import re
+from .consts import HTML_TAGNAME, HTML_ATTRIBUTES
+
+#: just blank lines
+NEWLINE = r'\n+'
 
 #: headings like::
 #:
@@ -30,7 +34,12 @@ _BLOCK_CODE_LEADING = re.compile(r'^ {4}', re.M)
 #: <hr> rule like: ``* * *``
 HRULE = r' {0,3}(?P<hr>-|\*|_)(?: *(?P=hr)){2,} *(?:\n+|$)'
 
-BLOCK_HTML = ''
+BLOCK_HTML = (
+    r' *<(?P<tag_name>' + HTML_TAGNAME + r')'
+    r'(' + HTML_ATTRIBUTES + r')'
+    r'\s*>([\s\S]*?)<\/(?P=tag_name)> *(?:\n+|$)'
+)
+
 
 #: normal table format like::
 #:
@@ -131,15 +140,19 @@ DEF_FOOTNOTE = (
 )
 
 
+def parse_newline(m):
+    return 'newline', None
+
+
 def parse_heading(m):
-    text = m.group(1)
-    level = len(m.group(0))
+    level = len(m.group(1))
+    text = m.group(2)
     return 'heading', (text, level)
 
 
 def parse_lheading(m):
-    text = m.group(0)
-    c = m.group(1)[0]
+    text = m.group(1)
+    c = m.group(2)[0]
     if c == '=':
         level = 1
     else:
@@ -163,57 +176,78 @@ def parse_hrule(m):
     return 'hrule', None
 
 
+def parse_block_html(m):
+    tag = m.group(1)
+    attributes = m.group(2)
+    content = m.group(3)
+    return 'block_html', (tag, attributes, content)
+
+
 def parse_table(m):
-    headers, aligns = _process_table(m.group(1), m.group(2))
+    headers = list(_process_table_headers(m.group(1), m.group(2)))
+    h_len = len(headers)
 
-    cells = re.sub(r'(?: *\| *)?\n$', '', m.group(3))
-    cells = cells.split('\n')
-    for i, v in enumerate(cells):
+    rows = re.sub(r'(?: *\| *)?\n$', '', m.group(3))
+    rows = rows.split('\n')
+    for i, v in enumerate(rows):
         v = re.sub(r'^ *\| *| *\| *$', '', v)
-        cells[i] = re.split(r' *(?<!\\)\| *', v)
+        cells = re.split(r' *(?<!\\)\| *', v)
+        for j, cell in enumerate(cells):
+            if j < h_len:
+                align = headers[j][1]
+            else:
+                align = None
+            # de-escape any pipe inside the cell here
+            text = _TABLE_CELL_SUB.sub('|', cell)
+            cells[j] = (text, align)
+        rows[i] = cells
 
-    cells = _process_cells(cells)
-    return 'table', (headers, aligns, cells)
+    return 'table', (headers, rows)
 
 
 def parse_nptable(m):
-    headers, aligns = _process_table(m.group(1), m.group(2))
+    headers = list(_process_table_headers(m.group(1), m.group(2)))
+    h_len = len(headers)
 
-    cells = re.sub(r'\n$', '', m.group(3))
-    cells = cells.split('\n')
-    for i, v in enumerate(cells):
-        cells[i] = re.split(r' *(?<!\\)\| *', v)
+    rows = re.sub(r'\n$', '', m.group(3))
+    rows = rows.split('\n')
+    for i, v in enumerate(rows):
+        cells = re.split(r' *(?<!\\)\| *', v)
+        for j, cell in enumerate(cells):
+            if j < h_len:
+                align = headers[j][1]
+            else:
+                align = None
+            # de-escape any pipe inside the cell here
+            text = _TABLE_CELL_SUB.sub('|', cell)
+            cells[j] = (text, align)
+        rows[i] = cells
 
-    cells = _process_cells(cells)
-    return 'table', (headers, aligns, cells)
+    return 'table', (headers, rows)
 
 
-def _process_table(header, align):
+def _process_table_headers(header, align):
     header = _TABLE_HEADER_SUB.sub('', header)
     headers = _TABLE_HEADER_SPLIT.split(header)
     align = _TABLE_ALIGN_SUB.sub('', align)
     aligns = _TABLE_ALIGN_SPLIT.split(align)
 
-    for i, v in enumerate(aligns):
-        if _TABLE_ALIGN_RIGHT.search(v):
-            aligns[i] = 'right'
-        elif _TABLE_ALIGN_CENTER.search(v):
-            aligns[i] = 'center'
-        elif _TABLE_ALIGN_LEFT.search(v):
-            aligns[i] = 'left'
+    aligns_length = len(aligns)
+
+    for i, h in enumerate(headers):
+        if i < aligns_length:
+            align = None
+            yield h, None
         else:
-            aligns[i] = None
-
-    return headers, aligns
-
-
-def _process_cells(cells):
-    for i, line in enumerate(cells):
-        for c, cell in enumerate(line):
-            # de-escape any pipe inside the cell here
-            cells[i][c] = _TABLE_CELL_SUB.sub('|', cell)
-
-    return cells
+            av = aligns[i]
+            if _TABLE_ALIGN_RIGHT.search(av):
+                yield h, 'right'
+            elif _TABLE_ALIGN_CENTER.search(av):
+                yield h, 'center'
+            elif _TABLE_ALIGN_LEFT.search(av):
+                yield h, 'left'
+            else:
+                yield h, None
 
 
 def parse_block_quote(m):
@@ -226,14 +260,14 @@ def parse_unordered_list(m):
     text = m.group(0)
     items = list(_parse_list_item(
         text, _UNORDERED_LIST_ITEM, _UNORDERED_LIST_BULLET))
-    return 'unordered_list', items
+    return 'list', (items, False)
 
 
 def parse_ordered_list(m):
     text = m.group(0)
     items = list(_parse_list_item(
         text, _ORDERED_LIST_ITEM, _ORDERED_LIST_BULLET))
-    return 'ordered_list', items
+    return 'list', (items, True)
 
 
 def _parse_list_item(text, item_pattern, bullet_pattern):
@@ -276,17 +310,50 @@ def parse_def_footnote(m):
     return 'def_footnote', (key, text)
 
 
-RULES = {
-    'heading': (HEADING, parse_heading),
-    'lheading': (LHEADING, parse_lheading),
-    'fences': (FENCES, parse_fences),
-    'block_code': (BLOCK_CODE, parse_block_code),
-    'hrule': (HRULE, parse_hrule),
-    'table': (TABLE, parse_table),
-    'nptable': (NPTABLE, parse_nptable),
-    'block_quote': (BLOCK_QUOTE, parse_block_quote),
-    'unordered_list': (UNORDERED_LIST, parse_unordered_list),
-    'ordered_list': (ORDERED_LIST, parse_ordered_list),
-    'def_link': (DEF_LINK, parse_def_link),
-    'def_footnote': (DEF_FOOTNOTE, parse_def_footnote),
-}
+# order matters, simple at top
+DEFAULT_BLOCK_LEXICON = [
+    (NEWLINE, parse_newline),
+    (HRULE, parse_hrule),
+    (BLOCK_CODE, parse_block_code),
+    (FENCES, parse_fences),
+    (HEADING, parse_heading),
+    (NPTABLE, parse_nptable),
+    (LHEADING, parse_lheading),
+    (BLOCK_QUOTE, parse_block_quote),
+    (UNORDERED_LIST, parse_unordered_list),
+    (ORDERED_LIST, parse_ordered_list),
+    (DEF_LINK, parse_def_link),
+    (DEF_FOOTNOTE, parse_def_footnote),
+    (TABLE, parse_table),
+    (BLOCK_HTML, parse_block_html),
+]
+
+BLOCK_QUOTE_LEXICON = [
+    (NEWLINE, parse_newline),
+    (HRULE, parse_hrule),
+    (BLOCK_CODE, parse_block_code),
+    (FENCES, parse_fences),
+    (HEADING, parse_heading),
+    (LHEADING, parse_lheading),
+    (BLOCK_QUOTE, parse_block_quote),
+    (UNORDERED_LIST, parse_unordered_list),
+    (ORDERED_LIST, parse_ordered_list),
+    (DEF_LINK, parse_def_link),
+    (DEF_FOOTNOTE, parse_def_footnote),
+    (BLOCK_HTML, parse_block_html),
+]
+
+LIST_ITEM_LEXICON = [
+    (NEWLINE, parse_newline),
+    (HRULE, parse_hrule),
+    (BLOCK_CODE, parse_block_code),
+    (FENCES, parse_fences),
+    (HEADING, parse_heading),
+    (LHEADING, parse_lheading),
+    (BLOCK_QUOTE, parse_block_quote),
+    (UNORDERED_LIST, parse_unordered_list),
+    (ORDERED_LIST, parse_ordered_list),
+    (DEF_LINK, parse_def_link),
+    (DEF_FOOTNOTE, parse_def_footnote),
+    (BLOCK_HTML, parse_block_html),
+]

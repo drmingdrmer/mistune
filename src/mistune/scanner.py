@@ -6,9 +6,9 @@ from sre_constants import BRANCH, SUBPATTERN
 is_py2 = sys.version_info[0] == 2
 
 if is_py2:
-    def _create_subpatterns(s, rules):
+    def _create_subpatterns(s, lexicon):
         p = []
-        for phrase, _ in rules:
+        for phrase, _ in lexicon:
             p.append(SubPattern(s, [
                 (SUBPATTERN, (len(p) + 1, parse(phrase, s.flags))),
             ]))
@@ -16,9 +16,9 @@ if is_py2:
         return p
 
 else:
-    def _create_subpatterns(s, rules):
+    def _create_subpatterns(s, lexicon):
         p = []
-        for phrase, _ in rules:
+        for phrase, _ in lexicon:
             gid = s.opengroup()
             p.append(SubPattern(s, [
                 (SUBPATTERN, (gid, 0, 0, parse(phrase, s.flags))),
@@ -28,12 +28,13 @@ else:
 
 
 class Scanner(object):
-    def __init__(self, rules, flags=0):
-        self.rules = rules
+    def __init__(self, lexicon, hole_type, flags=0):
+        self.lexicon = lexicon
+        self.hole_type = hole_type
         s = Pattern()
         s.flags = flags
 
-        p = _create_subpatterns(s, rules)
+        p = _create_subpatterns(s, lexicon)
         p = SubPattern(s, [(BRANCH, (None, p))])
         self._scanner = sre_compile(p).scanner
 
@@ -42,14 +43,14 @@ class Scanner(object):
 
         pos = 0
         for match in iter(sc.search, None):
-            _, method = self.rules[match.lastindex - 1]
+            _, method = self.lexicon[match.lastindex - 1]
             hole = string[pos:match.start()]
             if hole:
-                yield None, hole
+                yield self.hole_type, hole
 
             yield method(match)
             pos = match.end()
 
         hole = string[pos:]
         if hole:
-            yield None, hole
+            yield self.hole_type, hole
