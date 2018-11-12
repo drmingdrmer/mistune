@@ -1,18 +1,24 @@
 language: python
 
 python:
-    - "2.7"
-    - "3.5"
-    - "3.6"
-    - "pypy"
+  - "2.7"
+  - "3.5"
+  - "3.6"
+  - "3.7"
+  - "pypy"
 
 script:
-    - python setup.py -q nosetests
+  - python setup.py -q nosetests
 
 after_success:
-    - pip install coveralls
-    - coverage run --source=mistune setup.py -q nosetests
-    - coveralls
+  - pip install coveralls
+  - coverage run --source=mistune setup.py -q nosetests
+  - coveralls
 
 notifications:
-    email: false
+  email: false
+
+branches:
+  except:
+  - legacy
+  - /dev.*/
