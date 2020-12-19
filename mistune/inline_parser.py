@@ -1,7 +1,8 @@
 import re
 from .scanner import ScannerParser, escape_url, unikey
 
-PUNCTUATION = r'''\\!"#$%&'()*+,./:;<=>?@\[\]^`{}|_~-'''
+#  PUNCTUATION = r'''\\!"#$%&'()*+,./:;<=>?@\[\]^`{}|_~-'''
+PUNCTUATION = r'''!"#$%&'()*+,./:;<=>?@\[\]^`{}|_~-'''
 ESCAPE = r'\\[' + PUNCTUATION + ']'
 HTML_TAGNAME = r'[A-Za-z][A-Za-z0-9-]*'
 HTML_ATTRIBUTES = (
@@ -82,7 +83,8 @@ class InlineParser(ScannerParser):
     )
 
     #: linebreak leaves two spaces at the end of line
-    LINEBREAK = r'(?:\\| {2,})\n(?!\s*$)'
+    #  LINEBREAK = r'(?:\\| {2,})\n(?!\s*$)'
+    LINEBREAK = r'(?: {2,})\n(?!\s*$)'
 
     INLINE_HTML = (
         r'(?<!\\)<' + HTML_TAGNAME + HTML_ATTRIBUTES + r'\s*/?>|'  # open tag
